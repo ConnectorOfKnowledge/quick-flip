@@ -1,6 +1,7 @@
 export const prerender = false;
 
 import type { APIRoute } from 'astro';
+import { env as cfEnv } from 'cloudflare:workers';
 import type { SoldComp } from '../../lib/supabase';
 
 // eBay Finding API – findCompletedItems returns only sold/completed listings.
@@ -56,9 +57,8 @@ export const POST: APIRoute = async (context) => {
       );
     }
 
-    // Access env: Cloudflare Workers runtime first, then import.meta.env fallback (dev)
-    const cfEnv = (context.locals as any)?.runtime?.env;
-    const appId = cfEnv?.EBAY_APP_ID || import.meta.env.EBAY_APP_ID;
+    // Access env: Cloudflare Workers env first, then import.meta.env fallback (dev)
+    const appId = (cfEnv as any)?.EBAY_APP_ID || import.meta.env.EBAY_APP_ID;
 
     if (!appId) {
       throw new Error('eBay APP ID not configured');

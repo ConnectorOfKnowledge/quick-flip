@@ -1,6 +1,7 @@
 export const prerender = false;
 
 import type { APIRoute } from 'astro';
+import { env as cfEnv } from 'cloudflare:workers';
 
 interface GeminiResponse {
   candidates?: Array<{
@@ -20,7 +21,7 @@ interface ProductIdentification {
   condition_notes: string;
 }
 
-export const POST: APIRoute = async ({ request, locals }) => {
+export const POST: APIRoute = async ({ request }) => {
   const corsHeaders = {
     'Content-Type': 'application/json',
     'Access-Control-Allow-Origin': new URL(request.url).origin,
@@ -37,9 +38,8 @@ export const POST: APIRoute = async ({ request, locals }) => {
       );
     }
 
-    // Cloudflare Workers: secrets are on the runtime context, not import.meta.env
-    const runtimeEnv = (locals as any).runtime?.env;
-    const apiKey = runtimeEnv?.GEMINI_API_KEY || import.meta.env.GEMINI_API_KEY;
+    // Cloudflare Workers: use cloudflare:workers env, fallback to import.meta.env for local dev
+    const apiKey = (cfEnv as any)?.GEMINI_API_KEY || import.meta.env.GEMINI_API_KEY;
     if (!apiKey) {
       throw new Error('Gemini API key not configured');
     }

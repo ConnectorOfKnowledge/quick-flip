@@ -3,74 +3,49 @@ export const prerender = false;
 import type { APIRoute } from 'astro';
 import type { SoldComp } from '../../lib/supabase';
 
-// Module-level token cache
-let cachedToken: string | null = null;
-let tokenExpiresAt = 0;
+// eBay Finding API – findCompletedItems returns only sold/completed listings.
+// Uses the App ID directly as SECURITY-APPNAME (no OAuth token needed).
 
-async function getEbayAccessToken(): Promise<string> {
-  const now = Date.now();
-  if (cachedToken && now < tokenExpiresAt) {
-    return cachedToken;
-  }
-
-  const appId = import.meta.env.EBAY_APP_ID;
-  const certId = import.meta.env.EBAY_CERT_ID;
-
-  if (!appId || !certId) {
-    throw new Error('eBay API credentials not configured');
-  }
-
-  const credentials = btoa(`${appId}:${certId}`);
-
-  const response = await fetch('https://api.ebay.com/identity/v1/oauth2/token', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-      'Authorization': `Basic ${credentials}`,
-    },
-    body: new URLSearchParams({
-      grant_type: 'client_credentials',
-      scope: 'https://api.ebay.com/oauth/api_scope',
-    }),
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`eBay OAuth failed (${response.status}): ${errorText}`);
-  }
-
-  const data = await response.json();
-  cachedToken = data.access_token;
-  // Expire 60 seconds early to avoid edge cases
-  tokenExpiresAt = now + (data.expires_in - 60) * 1000;
-
-  return cachedToken!;
+interface FindingItem {
+  title: string[];
+  sellingStatus: Array<{
+    currentPrice: Array<{ __value__: string }>;
+    sellingState: string[];
+  }>;
+  listingInfo: Array<{
+    endTime: string[];
+  }>;
+  viewItemURL: string[];
+  condition?: Array<{
+    conditionDisplayName: string[];
+  }>;
+  galleryURL?: string[];
+  shippingInfo?: Array<{
+    shippingServiceCost?: Array<{ __value__: string }>;
+  }>;
 }
 
-interface BrowseSearchResponse {
-  itemSummaries?: Array<{
-    title: string;
-    price?: { value: string; currency: string };
-    condition?: string;
-    itemEndDate?: string;
-    itemWebUrl?: string;
-    image?: { imageUrl: string };
-    shippingOptions?: Array<{
-      shippingCost?: { value: string; currency: string };
+interface FindingResponse {
+  findCompletedItemsResponse: Array<{
+    ack: string[];
+    searchResult: Array<{
+      '@count': string;
+      item?: FindingItem[];
+    }>;
+    errorMessage?: Array<{
+      error: Array<{ message: string[] }>;
     }>;
   }>;
-  total?: number;
-  warnings?: unknown[];
 }
 
-export const POST: APIRoute = async ({ request }) => {
+export const POST: APIRoute = async (context) => {
   const corsHeaders = {
     'Content-Type': 'application/json',
-    'Access-Control-Allow-Origin': new URL(request.url).origin,
+    'Access-Control-Allow-Origin': new URL(context.request.url).origin,
   };
 
   try {
-    const body = await request.json();
+    const body = await context.request.json();
     const { query, barcode } = body as { query?: string; barcode?: string };
 
     const searchTerm = barcode || query;
@@ -81,34 +56,46 @@ export const POST: APIRoute = async ({ request }) => {
       );
     }
 
-    const token = await getEbayAccessToken();
+    // Access env: Cloudflare Workers runtime first, then import.meta.env fallback (dev)
+    const cfEnv = (context.locals as any)?.runtime?.env;
+    const appId = cfEnv?.EBAY_APP_ID || import.meta.env.EBAY_APP_ID;
 
-    // Search eBay Browse API for completed/sold items
+    if (!appId) {
+      throw new Error('eBay APP ID not configured');
+    }
+
+    // Build Finding API request for completed/sold items
     const params = new URLSearchParams({
-      q: searchTerm.trim(),
-      filter: 'buyingOptions:{FIXED_PRICE|AUCTION},conditions:{NEW|LIKE_NEW|VERY_GOOD|GOOD|ACCEPTABLE|USED_EXCELLENT|USED_VERY_GOOD|USED_GOOD|USED_ACCEPTABLE}',
-      sort: '-endDate',
-      limit: '20',
+      'OPERATION-NAME': 'findCompletedItems',
+      'SERVICE-VERSION': '1.13.0',
+      'SECURITY-APPNAME': appId,
+      'RESPONSE-DATA-FORMAT': 'JSON',
+      'REST-PAYLOAD': '',
+      'keywords': searchTerm.trim(),
+      'itemFilter(0).name': 'SoldItemsOnly',
+      'itemFilter(0).value': 'true',
+      'sortOrder': 'EndTimeSoonest',
+      'paginationInput.entriesPerPage': '20',
     });
 
     const searchResponse = await fetch(
-      `https://api.ebay.com/buy/browse/v1/item_summary/search?${params}`,
-      {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'X-EBAY-C-MARKETPLACE-ID': 'EBAY_US',
-          'Content-Type': 'application/json',
-        },
-      }
+      `https://svcs.ebay.com/services/search/FindingService/v1?${params}`
     );
 
     if (!searchResponse.ok) {
       const errorText = await searchResponse.text();
-      throw new Error(`eBay search failed (${searchResponse.status}): ${errorText}`);
+      throw new Error(`eBay Finding API failed (${searchResponse.status}): ${errorText}`);
     }
 
-    const searchData: BrowseSearchResponse = await searchResponse.json();
-    const items = searchData.itemSummaries ?? [];
+    const data: FindingResponse = await searchResponse.json();
+    const response = data.findCompletedItemsResponse?.[0];
+
+    if (!response || response.ack?.[0] === 'Failure') {
+      const errMsg = response?.errorMessage?.[0]?.error?.[0]?.message?.[0] ?? 'Unknown eBay error';
+      throw new Error(`eBay Finding API error: ${errMsg}`);
+    }
+
+    const items = response.searchResult?.[0]?.item ?? [];
 
     if (items.length === 0) {
       return new Response(
@@ -125,34 +112,33 @@ export const POST: APIRoute = async ({ request }) => {
       );
     }
 
-    // Extract comps
+    // Extract comps from sold items
     const comps: SoldComp[] = [];
     const prices: number[] = [];
     const shippingCosts: number[] = [];
 
     for (const item of items) {
-      const price = item.price ? parseFloat(item.price.value) : 0;
+      const priceStr = item.sellingStatus?.[0]?.currentPrice?.[0]?.__value__;
+      const price = priceStr ? parseFloat(priceStr) : 0;
       if (price <= 0) continue;
 
       prices.push(price);
 
       comps.push({
-        title: item.title ?? '',
+        title: item.title?.[0] ?? '',
         price,
-        date: item.itemEndDate ?? '',
-        condition: item.condition ?? 'Unknown',
-        url: item.itemWebUrl ?? '',
-        image_url: item.image?.imageUrl,
+        date: item.listingInfo?.[0]?.endTime?.[0] ?? '',
+        condition: item.condition?.[0]?.conditionDisplayName?.[0] ?? 'Unknown',
+        url: item.viewItemURL?.[0] ?? '',
+        image_url: item.galleryURL?.[0],
       });
 
       // Collect shipping costs for estimation
-      if (item.shippingOptions?.length) {
-        const cost = item.shippingOptions[0].shippingCost;
-        if (cost) {
-          const shippingVal = parseFloat(cost.value);
-          if (shippingVal > 0) {
-            shippingCosts.push(shippingVal);
-          }
+      const shippingStr = item.shippingInfo?.[0]?.shippingServiceCost?.[0]?.__value__;
+      if (shippingStr) {
+        const shippingVal = parseFloat(shippingStr);
+        if (shippingVal > 0) {
+          shippingCosts.push(shippingVal);
         }
       }
     }

@@ -1,0 +1,44 @@
+---
+import '../styles/global.css';
+---
+
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+		<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+		<meta name="theme-color" content="#2563eb" />
+		<meta name="apple-mobile-web-app-capable" content="yes" />
+		<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+		<link rel="manifest" href="/manifest.json" />
+		<link rel="apple-touch-icon" href="/icons/icon-192.png" />
+		<link rel="preconnect" href="https://fonts.googleapis.com" />
+		<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+		<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+		<title>Quick Flip</title>
+		<meta name="description" content="eBay resale profit calculator" />
+	</head>
+	<body class="no-overscroll min-h-screen">
+		<div id="app">
+			<!-- React app mounts here -->
+		</div>
+		<script>
+			// Register service worker for PWA + offline
+			if ('serviceWorker' in navigator) {
+				window.addEventListener('load', () => {
+					navigator.serviceWorker.register('/sw.js').catch(() => {
+						// SW registration failed -- app still works without it
+					});
+				});
+			}
+		</script>
+		<script>
+			import { createElement } from 'react';
+			import { createRoot } from 'react-dom/client';
+			import App from '../components/App';
+
+			const root = createRoot(document.getElementById('app')!);
+			root.render(createElement(App));
+		</script>
+	</body>
+</html>

@@ -1,0 +1,39 @@
+@import "tailwindcss";
+
+@theme {
+  --color-qf-bg: oklch(0.985 0.002 240);
+  --color-qf-surface: oklch(1 0 0);
+  --color-qf-surface-alt: oklch(0.97 0.005 240);
+  --color-qf-border: oklch(0.92 0.005 240);
+  --color-qf-text: oklch(0.2 0.02 260);
+  --color-qf-text-muted: oklch(0.55 0.015 260);
+  --color-qf-primary: oklch(0.55 0.2 260);
+  --color-qf-primary-hover: oklch(0.48 0.2 260);
+  --color-qf-accent: oklch(0.7 0.18 155);
+  --color-qf-danger: oklch(0.6 0.2 25);
+  --color-qf-warn: oklch(0.75 0.15 75);
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', monospace;
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: var(--color-qf-bg);
+  color: var(--color-qf-text);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.no-overscroll {
+  overscroll-behavior: none;
+}
+
+.viewfinder-overlay {
+  background: linear-gradient(
+    to bottom,
+    oklch(0 0 0 / 0.6) 0%,
+    oklch(0 0 0 / 0) 20%,
+    oklch(0 0 0 / 0) 80%,
+    oklch(0 0 0 / 0.6) 100%
+  );
+}

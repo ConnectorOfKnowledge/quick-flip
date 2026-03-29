@@ -111,15 +111,28 @@ export default function ScanView({ settings, queueCount, onQueueChange }: ScanVi
 
   async function capturePhoto() {
     const video = videoRef.current;
-    if (!video) return;
+    if (!video || video.videoWidth === 0) {
+      setError('Camera not ready yet. Wait a moment and try again.');
+      return;
+    }
+
+    // Resize to max 1024px on longest side -- saves bandwidth and stays within API limits
+    const maxDim = 1024;
+    let w = video.videoWidth;
+    let h = video.videoHeight;
+    if (w > maxDim || h > maxDim) {
+      const scale = maxDim / Math.max(w, h);
+      w = Math.round(w * scale);
+      h = Math.round(h * scale);
+    }
 
     const canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
+    canvas.width = w;
+    canvas.height = h;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    ctx.drawImage(video, 0, 0);
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+    ctx.drawImage(video, 0, 0, w, h);
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
     stopCamera();
 
     if (!isOnline()) {
@@ -139,11 +152,17 @@ export default function ScanView({ settings, queueCount, onQueueChange }: ScanVi
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ image: dataUrl }),
       });
-      if (!res.ok) throw new Error('Photo identification failed');
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({ error: `Server error ${res.status}` }));
+        throw new Error(errData.error || `Photo ID failed (${res.status})`);
+      }
       const data = await res.json();
+      if (!data.product_name) {
+        throw new Error('Could not identify product. Try a clearer photo or text search.');
+      }
       await performSearch(data.product_name, 'photo');
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Photo identification failed');
+      setError(err instanceof Error ? err.message : 'Photo identification failed. Try text search instead.');
     } finally {
       setLoading(false);
     }
